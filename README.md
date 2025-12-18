@@ -15,6 +15,7 @@ Arguments:
 Options:
   -r, --recursive              Recursive search
   -t, --threshold <THRESHOLD>  BPP Threshold (only show files with BPP > threshold)
+  -s, --sort                   Sort by BPP descending
   -h, --help                   Print help
   -V, --version                Print version
 ```
