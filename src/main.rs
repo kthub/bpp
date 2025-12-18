@@ -17,6 +17,10 @@ struct Cli {
     /// BPP Threshold (only show files with BPP > threshold)
     #[arg(short, long)]
     threshold: Option<f64>,
+
+    /// Sort by BPP descending
+    #[arg(short, long)]
+    sort: bool,
 }
 
 fn main() -> Result<()> {
@@ -38,6 +42,8 @@ fn main() -> Result<()> {
         WalkDir::new(&args.target_dir).max_depth(1)
     };
 
+    let mut results: Vec<(f64, String)> = Vec::new();
+
     for entry in walker.into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
 
@@ -45,46 +51,58 @@ fn main() -> Result<()> {
             if let Some(extension) = path.extension() {
                 if let Some(ext_str) = extension.to_str() {
                     if supported_extensions.contains(&ext_str.to_lowercase().as_str()) {
-                        process_image(&path.to_path_buf(), args.threshold)?;
+                        if let Ok(Some(bpp)) = calculate_bpp(&path.to_path_buf()) {
+                            if let Some(thresh) = args.threshold {
+                                if bpp <= thresh {
+                                    continue;
+                                }
+                            }
+
+                            // Get absolute path string
+                            let full_path = std::fs::canonicalize(path)
+                                .unwrap_or(path.to_path_buf())
+                                .display()
+                                .to_string();
+
+                            if args.sort {
+                                results.push((bpp, full_path));
+                            } else {
+                                println!("{:.2}\t{}", bpp, full_path);
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
+    if args.sort {
+        // Sort by BPP descending
+        results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        for (bpp, path) in results {
+            println!("{:.2}\t{}", bpp, path);
+        }
+    }
+
     Ok(())
 }
 
-fn process_image(path: &PathBuf, threshold: Option<f64>) -> Result<()> {
+fn calculate_bpp(path: &PathBuf) -> Result<Option<f64>> {
     let metadata = std::fs::metadata(path).context("Failed to get file metadata")?;
     let file_size = metadata.len();
 
     match image::image_dimensions(path) {
         Ok((width, height)) => {
             if width == 0 || height == 0 {
-                // Ignore zero dimension images silently or log debug? 
-                // Requirement doesn't specify, but better not division by zero.
-                return Ok(());
+                return Ok(None);
             }
 
             let bpp = (file_size * 8) as f64 / (width as u64 * height as u64) as f64;
-
-            if let Some(thresh) = threshold {
-                if bpp <= thresh {
-                    return Ok(());
-                }
-            }
-            
-            // Output format: "bpp"<TAB>"path" (no quotes around values)
-            // Using full path as requested
-            let full_path = std::fs::canonicalize(path).unwrap_or(path.clone());
-            println!("{:.2}\t{}", bpp, full_path.display());
+            Ok(Some(bpp))
         }
         Err(_) => {
-            // Silently ignore images that can't be read, or maybe warn?
-            // "image_bpp" skipped warning for most parts, let's keep it clean as it's a tool outputting data.
+            // Silently ignore images that can't be read
+            Ok(None)
         }
     }
-
-    Ok(())
 }
